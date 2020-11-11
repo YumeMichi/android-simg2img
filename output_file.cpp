@@ -17,6 +17,7 @@
 #define _FILE_OFFSET_BITS 64
 #define _LARGEFILE64_SOURCE 1
 
+#include <algorithm>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -47,13 +48,6 @@
 #define mmap64 mmap
 #define off64_t off_t
 #endif
-
-#define min(a, b)        \
-  ({                     \
-    typeof(a) _a = (a);  \
-    typeof(b) _b = (b);  \
-    (_a < _b) ? _a : _b; \
-  })
 
 #define SPARSE_HEADER_MAJOR_VER 1
 #define SPARSE_HEADER_MINOR_VER 0
@@ -231,7 +225,7 @@ static int gz_file_write(struct output_file* out, void* data, size_t len) {
   struct output_file_gz* outgz = to_output_file_gz(out);
 
   while (len > 0) {
-    ret = gzwrite(outgz->gz_fd, data, min(len, (unsigned int)INT_MAX));
+    ret = gzwrite(outgz->gz_fd, data, std::min<unsigned int>(len, (unsigned int)INT_MAX));
     if (ret == 0) {
       error("gzwrite %s", gzerror(outgz->gz_fd, nullptr));
       return -1;
@@ -268,7 +262,7 @@ static int callback_file_skip(struct output_file* out, int64_t off) {
   int ret;
 
   while (off > 0) {
-    to_write = min(off, (int64_t)INT_MAX);
+    to_write = std::min(off, (int64_t)INT_MAX);
     ret = outc->write(outc->priv, nullptr, to_write);
     if (ret < 0) {
       return ret;
@@ -470,7 +464,7 @@ static int write_normal_fill_chunk(struct output_file* out, unsigned int len, ui
   }
 
   while (len) {
-    write_len = min(len, out->block_size);
+    write_len = std::min(len, out->block_size);
     ret = out->ops->write(out, out->fill_buf, write_len);
     if (ret < 0) {
       return ret;
@@ -499,6 +493,10 @@ static struct sparse_file_ops normal_file_ops = {
 
 void output_file_close(struct output_file* out) {
   out->sparse_ops->write_end_chunk(out);
+  free(out->zero_buf);
+  free(out->fill_buf);
+  out->zero_buf = nullptr;
+  out->fill_buf = nullptr;
   out->ops->close(out);
 }
 
@@ -595,8 +593,8 @@ struct output_file* output_file_open_callback(int (*write)(void*, const void*, s
   int ret;
   struct output_file_callback* outc;
 
-  outc = reinterpret_cast<struct output_file_callback*>(
-      calloc(1, sizeof(struct output_file_callback)));
+  outc =
+      reinterpret_cast<struct output_file_callback*>(calloc(1, sizeof(struct output_file_callback)));
   if (!outc) {
     error_errno("malloc struct outc");
     return nullptr;
@@ -663,8 +661,8 @@ int write_fd_chunk(struct output_file* out, unsigned int len, int fd, int64_t of
 
 #ifndef _WIN32
   if (buffer_size > SIZE_MAX) return -E2BIG;
-  char* data = reinterpret_cast<char*>(
-      mmap64(nullptr, buffer_size, PROT_READ, MAP_SHARED, fd, aligned_offset));
+  char* data =
+      reinterpret_cast<char*>(mmap64(nullptr, buffer_size, PROT_READ, MAP_SHARED, fd, aligned_offset));
   if (data == MAP_FAILED) {
     return -errno;
   }
